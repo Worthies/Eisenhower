@@ -32,7 +32,7 @@ go.work.sum
 *.db-journal
 
 # Build binary
-eisenhower
+eisenhower-mcp-server
 eisenhower
 
 # Editor/IDE

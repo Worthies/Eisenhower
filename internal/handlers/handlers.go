@@ -147,6 +147,11 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 		}
 		if args.Status != nil {
 			task.Status = *args.Status
+			// Set finish timestamp when task is completed or cancelled
+			if *args.Status == "completed" || *args.Status == "cancelled" {
+				now := time.Now()
+				task.FinishedAt = &now
+			}
 		}
 		if args.Tags != nil {
 			task.Tags = *args.Tags
@@ -250,6 +255,8 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 		}
 
 		task.Status = "completed"
+		now := time.Now()
+		task.FinishedAt = &now
 
 		if err := h.db.UpdateTask(task); err != nil {
 			return nil, nil, err

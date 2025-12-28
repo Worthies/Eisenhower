@@ -31,14 +31,22 @@ type Task struct {
 	DueDate     *time.Time `json:"due_date,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
-	Tags        string     `json:"tags"`     // Comma-separated tags
-	Progress    int        `json:"progress"` // 0-100 percentage
-	Summary     string     `json:"summary"`  // Progress information appended over time
+	FinishedAt  *time.Time `json:"finished_at,omitempty"` // Timestamp when task was completed or cancelled
+	Tags        string     `json:"tags"`                  // Comma-separated tags
+	Progress    int        `json:"progress"`              // 0-100 percentage
+	Summary     string     `json:"summary"`               // Progress information appended over time
 }
 
 // DB wraps the SQLite database connection
 type DB struct {
 	conn *sql.DB
+}
+
+// Migration represents a database schema migration
+type Migration struct {
+	Version int
+	Name    string
+	SQL     string
 }
 
 // New creates a new database connection and initializes the schema
@@ -70,6 +78,12 @@ func New(dbPath string) (*DB, error) {
 	if err := db.initSchema(); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
+	}
+
+	// Run migrations
+	if err := db.runMigrations(); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 
 	return db, nil
@@ -107,6 +121,68 @@ func (db *DB) initSchema() error {
 	return err
 }
 
+// runMigrations runs all pending database migrations
+func (db *DB) runMigrations() error {
+	// Create migrations table if it doesn't exist
+	migrationsTable := `
+	CREATE TABLE IF NOT EXISTS schema_migrations (
+		version INTEGER PRIMARY KEY,
+		name TEXT NOT NULL,
+		applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+	`
+	if _, err := db.conn.Exec(migrationsTable); err != nil {
+		return fmt.Errorf("failed to create migrations table: %w", err)
+	}
+
+	// Define all migrations
+	migrations := []Migration{
+		{
+			Version: 1,
+			Name:    "add_progress_column",
+			SQL:     "ALTER TABLE tasks ADD COLUMN progress INTEGER DEFAULT 0 CHECK(progress >= 0 AND progress <= 100);",
+		},
+		{
+			Version: 2,
+			Name:    "add_summary_column",
+			SQL:     "ALTER TABLE tasks ADD COLUMN summary TEXT DEFAULT '';",
+		},
+		{
+			Version: 3,
+			Name:    "add_finished_at_column",
+			SQL:     "ALTER TABLE tasks ADD COLUMN finished_at DATETIME;",
+		},
+	}
+
+	// Apply each migration
+	for _, migration := range migrations {
+		// Check if migration has already been applied
+		var count int
+		err := db.conn.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE version = ?", migration.Version).Scan(&count)
+		if err != nil {
+			return fmt.Errorf("failed to check migration version %d: %w", migration.Version, err)
+		}
+
+		if count > 0 {
+			// Migration already applied, skip
+			continue
+		}
+
+		// Apply migration
+		if _, err := db.conn.Exec(migration.SQL); err != nil {
+			return fmt.Errorf("failed to apply migration %d (%s): %w", migration.Version, migration.Name, err)
+		}
+
+		// Record migration as applied
+		_, err = db.conn.Exec("INSERT INTO schema_migrations (version, name) VALUES (?, ?)", migration.Version, migration.Name)
+		if err != nil {
+			return fmt.Errorf("failed to record migration %d: %w", migration.Version, err)
+		}
+	}
+
+	return nil
+}
+
 // CreateTask creates a new task
 func (db *DB) CreateTask(task *Task) error {
 	query := `
@@ -141,13 +217,13 @@ func (db *DB) CreateTask(task *Task) error {
 // GetTask retrieves a task by ID
 func (db *DB) GetTask(id int64) (*Task, error) {
 	query := `
-		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, tags, progress, summary
+		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, finished_at, tags, progress, summary
 		FROM tasks
 		WHERE id = ?
 	`
 
 	task := &Task{}
-	var dueDate sql.NullTime
+	var dueDate, finishedAt sql.NullTime
 
 	err := db.conn.QueryRow(query, id).Scan(
 		&task.ID,
@@ -159,6 +235,7 @@ func (db *DB) GetTask(id int64) (*Task, error) {
 		&dueDate,
 		&task.CreatedAt,
 		&task.UpdatedAt,
+		&finishedAt,
 		&task.Tags,
 		&task.Progress,
 		&task.Summary,
@@ -173,6 +250,9 @@ func (db *DB) GetTask(id int64) (*Task, error) {
 	if dueDate.Valid {
 		task.DueDate = &dueDate.Time
 	}
+	if finishedAt.Valid {
+		task.FinishedAt = &finishedAt.Time
+	}
 
 	return task, nil
 }
@@ -180,7 +260,7 @@ func (db *DB) GetTask(id int64) (*Task, error) {
 // ListTasks retrieves all tasks with optional filtering
 func (db *DB) ListTasks(quadrant *Quadrant, status *string) ([]*Task, error) {
 	query := `
-		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, tags, progress, summary
+		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, finished_at, tags, progress, summary
 		FROM tasks
 		WHERE 1=1
 	`
@@ -207,7 +287,7 @@ func (db *DB) ListTasks(quadrant *Quadrant, status *string) ([]*Task, error) {
 	var tasks []*Task
 	for rows.Next() {
 		task := &Task{}
-		var dueDate sql.NullTime
+		var dueDate, finishedAt sql.NullTime
 
 		err := rows.Scan(
 			&task.ID,
@@ -219,6 +299,7 @@ func (db *DB) ListTasks(quadrant *Quadrant, status *string) ([]*Task, error) {
 			&dueDate,
 			&task.CreatedAt,
 			&task.UpdatedAt,
+			&finishedAt,
 			&task.Tags,
 			&task.Progress,
 			&task.Summary,
@@ -229,6 +310,9 @@ func (db *DB) ListTasks(quadrant *Quadrant, status *string) ([]*Task, error) {
 
 		if dueDate.Valid {
 			task.DueDate = &dueDate.Time
+		}
+		if finishedAt.Valid {
+			task.FinishedAt = &finishedAt.Time
 		}
 
 		tasks = append(tasks, task)
@@ -241,7 +325,7 @@ func (db *DB) ListTasks(quadrant *Quadrant, status *string) ([]*Task, error) {
 func (db *DB) UpdateTask(task *Task) error {
 	query := `
 		UPDATE tasks
-		SET title = ?, description = ?, quadrant = ?, priority = ?, status = ?, due_date = ?, tags = ?, progress = ?, summary = ?, updated_at = CURRENT_TIMESTAMP
+		SET title = ?, description = ?, quadrant = ?, priority = ?, status = ?, due_date = ?, finished_at = ?, tags = ?, progress = ?, summary = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 	`
 
@@ -252,6 +336,7 @@ func (db *DB) UpdateTask(task *Task) error {
 		task.Priority,
 		task.Status,
 		task.DueDate,
+		task.FinishedAt,
 		task.Tags,
 		task.Progress,
 		task.Summary,
@@ -297,7 +382,7 @@ func (db *DB) DeleteTask(id int64) error {
 // SearchTasks searches tasks by title, description, or tags
 func (db *DB) SearchTasks(searchTerm string) ([]*Task, error) {
 	query := `
-		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, tags, progress, summary
+		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, finished_at, tags, progress, summary
 		FROM tasks
 		WHERE title LIKE ? OR description LIKE ? OR tags LIKE ?
 		ORDER BY priority DESC, created_at DESC
@@ -313,7 +398,7 @@ func (db *DB) SearchTasks(searchTerm string) ([]*Task, error) {
 	var tasks []*Task
 	for rows.Next() {
 		task := &Task{}
-		var dueDate sql.NullTime
+		var dueDate, finishedAt sql.NullTime
 
 		err := rows.Scan(
 			&task.ID,
@@ -325,6 +410,7 @@ func (db *DB) SearchTasks(searchTerm string) ([]*Task, error) {
 			&dueDate,
 			&task.CreatedAt,
 			&task.UpdatedAt,
+			&finishedAt,
 			&task.Tags,
 			&task.Progress,
 			&task.Summary,
@@ -335,6 +421,9 @@ func (db *DB) SearchTasks(searchTerm string) ([]*Task, error) {
 
 		if dueDate.Valid {
 			task.DueDate = &dueDate.Time
+		}
+		if finishedAt.Valid {
+			task.FinishedAt = &finishedAt.Time
 		}
 
 		tasks = append(tasks, task)
