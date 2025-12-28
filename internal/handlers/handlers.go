@@ -30,6 +30,8 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 		Status      string  `json:"status,omitempty" jsonschema:"Task status: pending, in_progress, completed, or cancelled. Default is pending"`
 		DueDate     *string `json:"due_date,omitempty" jsonschema:"Due date in RFC3339 format, e.g. 2024-12-31T23:59:59Z"`
 		Tags        string  `json:"tags,omitempty" jsonschema:"Comma-separated tags for categorizing the task"`
+		Progress    *int    `json:"progress,omitempty" jsonschema:"Progress percentage (0-100)"`
+		Summary     string  `json:"summary,omitempty" jsonschema:"Initial progress summary information"`
 	}
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "create_task",
@@ -42,6 +44,7 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 			Priority:    args.Priority,
 			Status:      args.Status,
 			Tags:        args.Tags,
+			Summary:     args.Summary,
 		}
 
 		if task.Priority == 0 {
@@ -49,6 +52,9 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 		}
 		if task.Status == "" {
 			task.Status = "pending"
+		}
+		if args.Progress != nil {
+			task.Progress = *args.Progress
 		}
 
 		if args.DueDate != nil && *args.DueDate != "" {
@@ -114,6 +120,8 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 		Status      *string `json:"status,omitempty" jsonschema:"Task status"`
 		DueDate     *string `json:"due_date,omitempty" jsonschema:"Due date in RFC3339 format"`
 		Tags        *string `json:"tags,omitempty" jsonschema:"Comma-separated tags"`
+		Progress    *int    `json:"progress,omitempty" jsonschema:"Progress percentage (0-100)"`
+		Summary     *string `json:"summary,omitempty" jsonschema:"Progress information to insert to existing summary"`
 	}
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "update_task",
@@ -142,6 +150,19 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 		}
 		if args.Tags != nil {
 			task.Tags = *args.Tags
+		}
+		if args.Progress != nil {
+			task.Progress = *args.Progress
+		}
+		if args.Summary != nil && *args.Summary != "" {
+			// Prepend new summary with timestamp to existing summary
+			timestamp := time.Now().Format(time.RFC3339)
+			newSummaryEntry := fmt.Sprintf("[%s] %s", timestamp, *args.Summary)
+			if task.Summary != "" {
+				task.Summary = newSummaryEntry + "\n" + task.Summary
+			} else {
+				task.Summary = newSummaryEntry
+			}
 		}
 		if args.DueDate != nil {
 			dueDate, err := time.Parse(time.RFC3339, *args.DueDate)

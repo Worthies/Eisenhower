@@ -31,7 +31,9 @@ type Task struct {
 	DueDate     *time.Time `json:"due_date,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
-	Tags        string     `json:"tags"` // Comma-separated tags
+	Tags        string     `json:"tags"`     // Comma-separated tags
+	Progress    int        `json:"progress"` // 0-100 percentage
+	Summary     string     `json:"summary"`  // Progress information appended over time
 }
 
 // DB wraps the SQLite database connection
@@ -91,7 +93,9 @@ func (db *DB) initSchema() error {
 		due_date DATETIME,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		tags TEXT
+		tags TEXT,
+		progress INTEGER DEFAULT 0 CHECK(progress >= 0 AND progress <= 100),
+		summary TEXT
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_quadrant ON tasks(quadrant);
@@ -106,8 +110,8 @@ func (db *DB) initSchema() error {
 // CreateTask creates a new task
 func (db *DB) CreateTask(task *Task) error {
 	query := `
-		INSERT INTO tasks (title, description, quadrant, priority, status, due_date, tags)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO tasks (title, description, quadrant, priority, status, due_date, tags, progress, summary)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	result, err := db.conn.Exec(query,
@@ -118,6 +122,8 @@ func (db *DB) CreateTask(task *Task) error {
 		task.Status,
 		task.DueDate,
 		task.Tags,
+		task.Progress,
+		task.Summary,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create task: %w", err)
@@ -135,7 +141,7 @@ func (db *DB) CreateTask(task *Task) error {
 // GetTask retrieves a task by ID
 func (db *DB) GetTask(id int64) (*Task, error) {
 	query := `
-		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, tags
+		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, tags, progress, summary
 		FROM tasks
 		WHERE id = ?
 	`
@@ -154,6 +160,8 @@ func (db *DB) GetTask(id int64) (*Task, error) {
 		&task.CreatedAt,
 		&task.UpdatedAt,
 		&task.Tags,
+		&task.Progress,
+		&task.Summary,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task not found")
@@ -172,7 +180,7 @@ func (db *DB) GetTask(id int64) (*Task, error) {
 // ListTasks retrieves all tasks with optional filtering
 func (db *DB) ListTasks(quadrant *Quadrant, status *string) ([]*Task, error) {
 	query := `
-		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, tags
+		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, tags, progress, summary
 		FROM tasks
 		WHERE 1=1
 	`
@@ -212,6 +220,8 @@ func (db *DB) ListTasks(quadrant *Quadrant, status *string) ([]*Task, error) {
 			&task.CreatedAt,
 			&task.UpdatedAt,
 			&task.Tags,
+			&task.Progress,
+			&task.Summary,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan task: %w", err)
@@ -231,7 +241,7 @@ func (db *DB) ListTasks(quadrant *Quadrant, status *string) ([]*Task, error) {
 func (db *DB) UpdateTask(task *Task) error {
 	query := `
 		UPDATE tasks
-		SET title = ?, description = ?, quadrant = ?, priority = ?, status = ?, due_date = ?, tags = ?, updated_at = CURRENT_TIMESTAMP
+		SET title = ?, description = ?, quadrant = ?, priority = ?, status = ?, due_date = ?, tags = ?, progress = ?, summary = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 	`
 
@@ -243,6 +253,8 @@ func (db *DB) UpdateTask(task *Task) error {
 		task.Status,
 		task.DueDate,
 		task.Tags,
+		task.Progress,
+		task.Summary,
 		task.ID,
 	)
 	if err != nil {
@@ -285,7 +297,7 @@ func (db *DB) DeleteTask(id int64) error {
 // SearchTasks searches tasks by title, description, or tags
 func (db *DB) SearchTasks(searchTerm string) ([]*Task, error) {
 	query := `
-		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, tags
+		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, tags, progress, summary
 		FROM tasks
 		WHERE title LIKE ? OR description LIKE ? OR tags LIKE ?
 		ORDER BY priority DESC, created_at DESC
@@ -314,6 +326,8 @@ func (db *DB) SearchTasks(searchTerm string) ([]*Task, error) {
 			&task.CreatedAt,
 			&task.UpdatedAt,
 			&task.Tags,
+			&task.Progress,
+			&task.Summary,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan task: %w", err)
