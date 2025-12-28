@@ -1,0 +1,11 @@
+# Example VS Code MCP Settings
+# Add this to your VS Code settings.json
+
+{
+  "github.copilot.chat.mcp.servers": {
+    "eisenhower": {
+      "command": "/path/to/eisenhower",
+      "args": ["-db", "~/.config/eisenhower.db"]
+    }
+  }
+}
