@@ -41,6 +41,10 @@ type UpdateTaskArgs struct {
 	Project     *string `json:"project" jsonschema:"Project this task belongs to"`
 }
 
+type GetProjectsArgs struct {
+	Status *string `json:"status" jsonschema:"Filter by status: pending, in_progress, completed, cancelled. If not provided, returns projects from all tasks."`
+}
+
 // TaskHandlers contains handlers for all task-related MCP tools
 type TaskHandlers struct {
 	db *database.DB
@@ -350,6 +354,52 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 		}
 
 		return formatResponse(stats), nil, nil
+	})
+
+	// Get Projects
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "get_projects",
+		Description: "Get unique project names from all tasks. Optionally filter to show only projects with active (pending/in_progress) tasks.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"include_completed": map[string]interface{}{
+					"type":        "boolean",
+					"description": "If true, include projects where all tasks are completed or cancelled. If false, only show projects with at least one pending or in_progress task. Default is true (show all projects).",
+				},
+			},
+		},
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args GetProjectsArgs) (*mcp.CallToolResult, any, error) {
+		includeCompleted := true // default
+
+		// Parse the include_completed parameter from raw JSON
+		if len(req.Params.Arguments) > 0 {
+			var argMap map[string]interface{}
+			if err := json.Unmarshal(req.Params.Arguments, &argMap); err == nil {
+				if val, exists := argMap["include_completed"]; exists {
+					if boolVal, ok := val.(bool); ok {
+						includeCompleted = boolVal
+					}
+				}
+			}
+		}
+
+		projects, err := h.db.GetDistinctProjects(includeCompleted)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// If no projects found, return empty array
+		if projects == nil {
+			projects = []string{}
+		}
+
+		response := map[string]interface{}{
+			"projects": projects,
+			"count":    len(projects),
+		}
+
+		return formatResponse(response), nil, nil
 	})
 }
 

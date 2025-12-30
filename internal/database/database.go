@@ -535,3 +535,48 @@ func (db *DB) GetStatistics() (map[string]interface{}, error) {
 
 	return stats, nil
 }
+
+// GetDistinctProjects returns a sorted list of unique project names
+// If includeCompleted is false, only projects with pending or in_progress tasks are returned
+func (db *DB) GetDistinctProjects(includeCompleted bool) ([]string, error) {
+	var query string
+	if includeCompleted {
+		// Get all projects
+		query = `
+			SELECT DISTINCT project
+			FROM tasks
+			WHERE project IS NOT NULL
+			ORDER BY project ASC
+		`
+	} else {
+		// Get only projects with active tasks
+		query = `
+			SELECT DISTINCT project
+			FROM tasks
+			WHERE project IS NOT NULL
+			AND (status = 'pending' OR status = 'in_progress')
+			ORDER BY project ASC
+		`
+	}
+
+	rows, err := db.conn.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var projects []string
+	for rows.Next() {
+		var project string
+		if err := rows.Scan(&project); err != nil {
+			return nil, err
+		}
+		projects = append(projects, project)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return projects, nil
+}

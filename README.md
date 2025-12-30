@@ -178,6 +178,14 @@ Get statistics about all tasks (counts by quadrant and status).
 
 **Parameters:** None
 
+### 10. `get_projects`
+
+Get unique project names from all tasks with optional filtering.
+
+**Parameters:**
+
+- `include_completed` (optional): If true, include projects where all tasks are completed or cancelled. If false, only show projects with at least one pending or in_progress task. Default is true (show all projects).
+
 ## Example Usage with VS Code Copilot
 
 Once configured, you can interact with the Eisenhower Matrix directly in VS Code Copilot Chat:
