@@ -20,6 +20,8 @@ This is a Model Context Protocol (MCP) server that provides comprehensive task m
 - 💾 Persistent storage using SQLite3
 - 🔌 Standard MCP protocol support via stdio
 - 🛠️ Built with official [github.com/modelcontextprotocol/go-sdk](https://github.com/modelcontextprotocol/go-sdk)
+- 🏷️ **NEW:** Project field for organizing tasks by project
+- ⏱️ **NEW:** Start timestamp tracking to record when tasks begin
 
 👉 **See [FEATURES.md](FEATURES.md) for complete feature list and roadmap**
 
@@ -107,7 +109,9 @@ Create a new task in the Eisenhower Matrix.
 - `priority` (optional): Priority level 1-5 (default: 3)
 - `status` (optional): One of: `pending`, `in_progress`, `completed`, `cancelled` (default: `pending`)
 - `due_date` (optional): Due date in RFC3339 format (e.g., `2024-12-31T23:59:59Z`)
+- `started_at` (optional): Start timestamp in RFC3339 format (e.g., `2024-12-31T23:59:59Z`)
 - `tags` (optional): Comma-separated tags
+- `project` (optional): Project name (default: `Routine`)
 
 ### 2. `get_task`
 
@@ -213,9 +217,14 @@ CREATE TABLE tasks (
     priority INTEGER DEFAULT 3 CHECK(priority >= 1 AND priority <= 5),
     status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'in_progress', 'completed', 'cancelled')),
     due_date DATETIME,
+    started_at DATETIME,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    tags TEXT
+    finished_at DATETIME,
+    tags TEXT,
+    progress INTEGER DEFAULT 0 CHECK(progress >= 0 AND progress <= 100),
+    summary TEXT,
+    project TEXT DEFAULT 'Routine'
 );
 ```
 

@@ -32,9 +32,11 @@ type Task struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 	FinishedAt  *time.Time `json:"finished_at,omitempty"` // Timestamp when task was completed or cancelled
+	StartedAt   *time.Time `json:"started_at,omitempty"`  // Timestamp when task was started
 	Tags        string     `json:"tags"`                  // Comma-separated tags
 	Progress    int        `json:"progress"`              // 0-100 percentage
 	Summary     string     `json:"summary"`               // Progress information appended over time
+	Project     *string    `json:"project,omitempty"`     // Project this task belongs to
 }
 
 // DB wraps the SQLite database connection
@@ -152,6 +154,16 @@ func (db *DB) runMigrations() error {
 			Name:    "add_finished_at_column",
 			SQL:     "ALTER TABLE tasks ADD COLUMN finished_at DATETIME;",
 		},
+		{
+			Version: 4,
+			Name:    "add_started_at_column",
+			SQL:     "ALTER TABLE tasks ADD COLUMN started_at DATETIME;",
+		},
+		{
+			Version: 5,
+			Name:    "add_project_column",
+			SQL:     "ALTER TABLE tasks ADD COLUMN project TEXT;",
+		},
 	}
 
 	// Apply each migration
@@ -186,8 +198,8 @@ func (db *DB) runMigrations() error {
 // CreateTask creates a new task
 func (db *DB) CreateTask(task *Task) error {
 	query := `
-		INSERT INTO tasks (title, description, quadrant, priority, status, due_date, tags, progress, summary)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO tasks (title, description, quadrant, priority, status, due_date, started_at, tags, progress, summary, project)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	result, err := db.conn.Exec(query,
@@ -197,9 +209,11 @@ func (db *DB) CreateTask(task *Task) error {
 		task.Priority,
 		task.Status,
 		task.DueDate,
+		task.StartedAt,
 		task.Tags,
 		task.Progress,
 		task.Summary,
+		task.Project,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create task: %w", err)
@@ -217,13 +231,14 @@ func (db *DB) CreateTask(task *Task) error {
 // GetTask retrieves a task by ID
 func (db *DB) GetTask(id int64) (*Task, error) {
 	query := `
-		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, finished_at, tags, progress, summary
+		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, finished_at, started_at, tags, progress, summary, project
 		FROM tasks
 		WHERE id = ?
 	`
 
 	task := &Task{}
-	var dueDate, finishedAt sql.NullTime
+	var dueDate, finishedAt, startedAt sql.NullTime
+	var project sql.NullString
 
 	err := db.conn.QueryRow(query, id).Scan(
 		&task.ID,
@@ -236,9 +251,11 @@ func (db *DB) GetTask(id int64) (*Task, error) {
 		&task.CreatedAt,
 		&task.UpdatedAt,
 		&finishedAt,
+		&startedAt,
 		&task.Tags,
 		&task.Progress,
 		&task.Summary,
+		&project,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task not found")
@@ -253,6 +270,12 @@ func (db *DB) GetTask(id int64) (*Task, error) {
 	if finishedAt.Valid {
 		task.FinishedAt = &finishedAt.Time
 	}
+	if startedAt.Valid {
+		task.StartedAt = &startedAt.Time
+	}
+	if project.Valid {
+		task.Project = &project.String
+	}
 
 	return task, nil
 }
@@ -260,7 +283,7 @@ func (db *DB) GetTask(id int64) (*Task, error) {
 // ListTasks retrieves all tasks with optional filtering
 func (db *DB) ListTasks(quadrant *Quadrant, status *string) ([]*Task, error) {
 	query := `
-		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, finished_at, tags, progress, summary
+		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, finished_at, started_at, tags, progress, summary, project
 		FROM tasks
 		WHERE 1=1
 	`
@@ -287,7 +310,8 @@ func (db *DB) ListTasks(quadrant *Quadrant, status *string) ([]*Task, error) {
 	var tasks []*Task
 	for rows.Next() {
 		task := &Task{}
-		var dueDate, finishedAt sql.NullTime
+		var dueDate, finishedAt, startedAt sql.NullTime
+		var project sql.NullString
 
 		err := rows.Scan(
 			&task.ID,
@@ -300,9 +324,11 @@ func (db *DB) ListTasks(quadrant *Quadrant, status *string) ([]*Task, error) {
 			&task.CreatedAt,
 			&task.UpdatedAt,
 			&finishedAt,
+			&startedAt,
 			&task.Tags,
 			&task.Progress,
 			&task.Summary,
+			&project,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan task: %w", err)
@@ -313,6 +339,12 @@ func (db *DB) ListTasks(quadrant *Quadrant, status *string) ([]*Task, error) {
 		}
 		if finishedAt.Valid {
 			task.FinishedAt = &finishedAt.Time
+		}
+		if startedAt.Valid {
+			task.StartedAt = &startedAt.Time
+		}
+		if project.Valid {
+			task.Project = &project.String
 		}
 
 		tasks = append(tasks, task)
@@ -325,7 +357,7 @@ func (db *DB) ListTasks(quadrant *Quadrant, status *string) ([]*Task, error) {
 func (db *DB) UpdateTask(task *Task) error {
 	query := `
 		UPDATE tasks
-		SET title = ?, description = ?, quadrant = ?, priority = ?, status = ?, due_date = ?, finished_at = ?, tags = ?, progress = ?, summary = ?, updated_at = CURRENT_TIMESTAMP
+		SET title = ?, description = ?, quadrant = ?, priority = ?, status = ?, due_date = ?, finished_at = ?, started_at = ?, tags = ?, progress = ?, summary = ?, project = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 	`
 
@@ -337,9 +369,11 @@ func (db *DB) UpdateTask(task *Task) error {
 		task.Status,
 		task.DueDate,
 		task.FinishedAt,
+		task.StartedAt,
 		task.Tags,
 		task.Progress,
 		task.Summary,
+		task.Project,
 		task.ID,
 	)
 	if err != nil {
@@ -382,7 +416,7 @@ func (db *DB) DeleteTask(id int64) error {
 // SearchTasks searches tasks by title, description, or tags
 func (db *DB) SearchTasks(searchTerm string) ([]*Task, error) {
 	query := `
-		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, finished_at, tags, progress, summary
+		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, finished_at, started_at, tags, progress, summary, project
 		FROM tasks
 		WHERE title LIKE ? OR description LIKE ? OR tags LIKE ?
 		ORDER BY priority DESC, created_at DESC
@@ -398,7 +432,8 @@ func (db *DB) SearchTasks(searchTerm string) ([]*Task, error) {
 	var tasks []*Task
 	for rows.Next() {
 		task := &Task{}
-		var dueDate, finishedAt sql.NullTime
+		var dueDate, finishedAt, startedAt sql.NullTime
+		var project sql.NullString
 
 		err := rows.Scan(
 			&task.ID,
@@ -411,9 +446,11 @@ func (db *DB) SearchTasks(searchTerm string) ([]*Task, error) {
 			&task.CreatedAt,
 			&task.UpdatedAt,
 			&finishedAt,
+			&startedAt,
 			&task.Tags,
 			&task.Progress,
 			&task.Summary,
+			&project,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan task: %w", err)
@@ -424,6 +461,12 @@ func (db *DB) SearchTasks(searchTerm string) ([]*Task, error) {
 		}
 		if finishedAt.Valid {
 			task.FinishedAt = &finishedAt.Time
+		}
+		if startedAt.Valid {
+			task.StartedAt = &startedAt.Time
+		}
+		if project.Valid {
+			task.Project = &project.String
 		}
 
 		tasks = append(tasks, task)

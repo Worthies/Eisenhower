@@ -2,12 +2,44 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/worthies/eisenhower/internal/database"
 )
+
+// Define MCP tool argument types at package level for proper schema generation
+type CreateTaskArgs struct {
+	Title       string  `json:"title" jsonschema:"The title of the task"`
+	Description string  `json:"description" jsonschema:"Detailed description of the task"`
+	Quadrant    string  `json:"quadrant" jsonschema:"The Eisenhower Matrix quadrant: urgent_important, not_urgent_important, urgent_not_important, or not_urgent_not_important"`
+	Priority    int     `json:"priority" jsonschema:"Priority level from 1 to 5, where 5 is highest priority. Default is 3"`
+	Status      string  `json:"status" jsonschema:"Task status: pending, in_progress, completed, or cancelled. Default is pending"`
+	DueDate     *string `json:"due_date" jsonschema:"Due date in RFC3339 format, e.g. 2024-12-31T23:59:59Z"`
+	StartedAt   *string `json:"started_at" jsonschema:"Start timestamp in RFC3339 format, e.g. 2024-12-31T23:59:59Z"`
+	Tags        string  `json:"tags" jsonschema:"Comma-separated tags for categorizing the task"`
+	Progress    *int    `json:"progress" jsonschema:"Progress percentage (0-100)"`
+	Summary     string  `json:"summary" jsonschema:"Initial progress summary information"`
+	Project     *string `json:"project" jsonschema:"Project this task belongs to"`
+}
+
+type UpdateTaskArgs struct {
+	ID          int64   `json:"id" jsonschema:"The task ID"`
+	Title       *string `json:"title" jsonschema:"The title of the task"`
+	Description *string `json:"description" jsonschema:"Detailed description of the task"`
+	Quadrant    *string `json:"quadrant" jsonschema:"The Eisenhower Matrix quadrant"`
+	Priority    *int    `json:"priority" jsonschema:"Priority level from 1 to 5"`
+	Status      *string `json:"status" jsonschema:"Task status"`
+	DueDate     *string `json:"due_date" jsonschema:"Due date in RFC3339 format"`
+	StartedAt   *string `json:"started_at" jsonschema:"Start timestamp in RFC3339 format"`
+	Tags        *string `json:"tags" jsonschema:"Comma-separated tags"`
+	Progress    *int    `json:"progress" jsonschema:"Progress percentage (0-100)"`
+	Summary     *string `json:"summary" jsonschema:"Progress information to insert to existing summary"`
+	Project     *string `json:"project" jsonschema:"Project this task belongs to"`
+}
 
 // TaskHandlers contains handlers for all task-related MCP tools
 type TaskHandlers struct {
@@ -21,22 +53,30 @@ func NewTaskHandlers(db *database.DB) *TaskHandlers {
 
 // RegisterTools registers all task management tools with the MCP server
 func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
-	// Create Task
-	type createTaskArgs struct {
-		Title       string  `json:"title" jsonschema:"The title of the task"`
-		Description string  `json:"description,omitempty" jsonschema:"Detailed description of the task"`
-		Quadrant    string  `json:"quadrant" jsonschema:"The Eisenhower Matrix quadrant: urgent_important, not_urgent_important, urgent_not_important, or not_urgent_not_important"`
-		Priority    int     `json:"priority,omitempty" jsonschema:"Priority level from 1 to 5, where 5 is highest priority. Default is 3"`
-		Status      string  `json:"status,omitempty" jsonschema:"Task status: pending, in_progress, completed, or cancelled. Default is pending"`
-		DueDate     *string `json:"due_date,omitempty" jsonschema:"Due date in RFC3339 format, e.g. 2024-12-31T23:59:59Z"`
-		Tags        string  `json:"tags,omitempty" jsonschema:"Comma-separated tags for categorizing the task"`
-		Progress    *int    `json:"progress,omitempty" jsonschema:"Progress percentage (0-100)"`
-		Summary     string  `json:"summary,omitempty" jsonschema:"Initial progress summary information"`
+	// Create Task - manually build schema to ensure all fields are included
+	createTaskSchema := &jsonschema.Schema{
+		Type: "object",
+		Properties: map[string]*jsonschema.Schema{
+			"title":       {Type: "string", Description: "The title of the task"},
+			"description": {Type: "string", Description: "Detailed description of the task"},
+			"quadrant":    {Type: "string", Description: "The Eisenhower Matrix quadrant"},
+			"priority":    {Type: "integer", Description: "Priority level from 1 to 5"},
+			"status":      {Type: "string", Description: "Task status"},
+			"due_date":    {Type: "string", Description: "Due date in RFC3339 format"},
+			"started_at":  {Type: "string", Description: "Start timestamp in RFC3339 format"},
+			"tags":        {Type: "string", Description: "Comma-separated tags"},
+			"progress":    {Type: "integer", Description: "Progress percentage"},
+			"summary":     {Type: "string", Description: "Summary"},
+			"project":     {Type: "string", Description: "Project this task belongs to"},
+		},
+		Required: []string{"title", "quadrant"},
 	}
+
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "create_task",
 		Description: "Create a new task in the Eisenhower Matrix. Quadrants: urgent_important (Do First), not_urgent_important (Schedule), urgent_not_important (Delegate), not_urgent_not_important (Eliminate).",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, args createTaskArgs) (*mcp.CallToolResult, any, error) {
+		InputSchema: createTaskSchema,
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args CreateTaskArgs) (*mcp.CallToolResult, any, error) {
 		task := &database.Task{
 			Title:       args.Title,
 			Description: args.Description,
@@ -53,6 +93,13 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 		if task.Status == "" {
 			task.Status = "pending"
 		}
+		// Set project with default value
+		if args.Project != nil && *args.Project != "" {
+			task.Project = args.Project
+		} else {
+			defaultProject := "Routine"
+			task.Project = &defaultProject
+		}
 		if args.Progress != nil {
 			task.Progress = *args.Progress
 		}
@@ -63,6 +110,14 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 				return nil, nil, fmt.Errorf("invalid due_date format: %w", err)
 			}
 			task.DueDate = &dueDate
+		}
+
+		if args.StartedAt != nil && *args.StartedAt != "" {
+			startedAt, err := time.Parse(time.RFC3339, *args.StartedAt)
+			if err != nil {
+				return nil, nil, fmt.Errorf("invalid started_at format: %w", err)
+			}
+			task.StartedAt = &startedAt
 		}
 
 		if err := h.db.CreateTask(task); err != nil {
@@ -110,23 +165,31 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 		return formatResponse(tasks), nil, nil
 	})
 
-	// Update Task
-	type updateTaskArgs struct {
-		ID          int64   `json:"id" jsonschema:"The task ID"`
-		Title       *string `json:"title,omitempty" jsonschema:"The title of the task"`
-		Description *string `json:"description,omitempty" jsonschema:"Detailed description of the task"`
-		Quadrant    *string `json:"quadrant,omitempty" jsonschema:"The Eisenhower Matrix quadrant"`
-		Priority    *int    `json:"priority,omitempty" jsonschema:"Priority level from 1 to 5"`
-		Status      *string `json:"status,omitempty" jsonschema:"Task status"`
-		DueDate     *string `json:"due_date,omitempty" jsonschema:"Due date in RFC3339 format"`
-		Tags        *string `json:"tags,omitempty" jsonschema:"Comma-separated tags"`
-		Progress    *int    `json:"progress,omitempty" jsonschema:"Progress percentage (0-100)"`
-		Summary     *string `json:"summary,omitempty" jsonschema:"Progress information to insert to existing summary"`
+	// Update Task - manually build schema to ensure all fields are included
+	updateTaskSchema := &jsonschema.Schema{
+		Type: "object",
+		Properties: map[string]*jsonschema.Schema{
+			"id":          {Type: "integer", Description: "The task ID"},
+			"title":       {Type: "string", Description: "The title of the task"},
+			"description": {Type: "string", Description: "Detailed description of the task"},
+			"quadrant":    {Type: "string", Description: "The Eisenhower Matrix quadrant"},
+			"priority":    {Type: "integer", Description: "Priority level from 1 to 5"},
+			"status":      {Type: "string", Description: "Task status"},
+			"due_date":    {Type: "string", Description: "Due date in RFC3339 format"},
+			"started_at":  {Type: "string", Description: "Start timestamp in RFC3339 format"},
+			"tags":        {Type: "string", Description: "Comma-separated tags"},
+			"progress":    {Type: "integer", Description: "Progress percentage"},
+			"summary":     {Type: "string", Description: "Summary"},
+			"project":     {Type: "string", Description: "Project this task belongs to"},
+		},
+		Required: []string{"id"},
 	}
+
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "update_task",
 		Description: "Update an existing task. All fields except ID are optional - only provide the fields you want to update.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, args updateTaskArgs) (*mcp.CallToolResult, any, error) {
+		InputSchema: updateTaskSchema,
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args UpdateTaskArgs) (*mcp.CallToolResult, any, error) {
 		task, err := h.db.GetTask(args.ID)
 		if err != nil {
 			return nil, nil, err
@@ -175,6 +238,16 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 				return nil, nil, fmt.Errorf("invalid due_date format: %w", err)
 			}
 			task.DueDate = &dueDate
+		}
+		if args.StartedAt != nil {
+			startedAt, err := time.Parse(time.RFC3339, *args.StartedAt)
+			if err != nil {
+				return nil, nil, fmt.Errorf("invalid started_at format: %w", err)
+			}
+			task.StartedAt = &startedAt
+		}
+		if args.Project != nil && *args.Project != "" {
+			task.Project = args.Project
 		}
 
 		if err := h.db.UpdateTask(task); err != nil {
@@ -280,12 +353,23 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 	})
 }
 
-// Helper function to format responses
+// Helper function to format responses as JSON
 func formatResponse(data interface{}) *mcp.CallToolResult {
+	jsonData, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		// Fallback to fmt.Sprintf if JSON marshaling fails
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("%+v", data),
+				},
+			},
+		}
+	}
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			&mcp.TextContent{
-				Text: fmt.Sprintf("%+v", data),
+				Text: string(jsonData),
 			},
 		},
 	}
