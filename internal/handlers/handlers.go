@@ -148,13 +148,15 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 
 	// List Tasks
 	type listTasksArgs struct {
-		Quadrant *string `json:"quadrant,omitempty" jsonschema:"Filter by quadrant: urgent_important, not_urgent_important, urgent_not_important, or not_urgent_not_important"`
-		Status   *string `json:"status,omitempty" jsonschema:"Filter by status: pending, in_progress, completed, or cancelled"`
-		Project  *string `json:"project,omitempty" jsonschema:"Filter by project name"`
+		Quadrant     *string `json:"quadrant,omitempty" jsonschema:"Filter by quadrant: urgent_important, not_urgent_important, urgent_not_important, or not_urgent_not_important"`
+		Status       *string `json:"status,omitempty" jsonschema:"Filter by status: pending, in_progress, completed, or cancelled"`
+		Project      *string `json:"project,omitempty" jsonschema:"Filter by project name"`
+		UpdatedSince *string `json:"updated_since,omitempty" jsonschema:"Filter by tasks updated after this time (RFC3339 format, e.g. 2024-12-31T23:59:59Z)"`
+		UpdatedUntil *string `json:"updated_until,omitempty" jsonschema:"Filter by tasks updated before this time (RFC3339 format, e.g. 2024-12-31T23:59:59Z)"`
 	}
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "list_tasks",
-		Description: "List all tasks with optional filtering by quadrant, status, and/or project.",
+		Description: "List all tasks with optional filtering by quadrant, status, project, and/or update time range.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args listTasksArgs) (*mcp.CallToolResult, any, error) {
 		var quadrant *database.Quadrant
 		if args.Quadrant != nil {
@@ -162,7 +164,23 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 			quadrant = &q
 		}
 
-		tasks, err := h.db.ListTasks(quadrant, args.Status, args.Project)
+		var updatedSince, updatedUntil *time.Time
+		if args.UpdatedSince != nil && *args.UpdatedSince != "" {
+			t, err := time.Parse(time.RFC3339, *args.UpdatedSince)
+			if err != nil {
+				return nil, nil, fmt.Errorf("invalid updated_since format: %w", err)
+			}
+			updatedSince = &t
+		}
+		if args.UpdatedUntil != nil && *args.UpdatedUntil != "" {
+			t, err := time.Parse(time.RFC3339, *args.UpdatedUntil)
+			if err != nil {
+				return nil, nil, fmt.Errorf("invalid updated_until format: %w", err)
+			}
+			updatedUntil = &t
+		}
+
+		tasks, err := h.db.ListTasks(quadrant, args.Status, args.Project, updatedSince, updatedUntil)
 		if err != nil {
 			return nil, nil, err
 		}

@@ -130,6 +130,8 @@ List all tasks with optional filtering.
 - `quadrant` (optional): Filter by quadrant
 - `status` (optional): Filter by status
 - `project` (optional): Filter by project name
+- `updated_since` (optional): Filter by tasks updated after this time (RFC3339 format, e.g. `2024-12-31T23:59:59Z`)
+- `updated_until` (optional): Filter by tasks updated before this time (RFC3339 format, e.g. `2024-12-31T23:59:59Z`)
 
 ### 4. `update_task`
 
