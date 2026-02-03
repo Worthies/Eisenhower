@@ -150,10 +150,11 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 	type listTasksArgs struct {
 		Quadrant *string `json:"quadrant,omitempty" jsonschema:"Filter by quadrant: urgent_important, not_urgent_important, urgent_not_important, or not_urgent_not_important"`
 		Status   *string `json:"status,omitempty" jsonschema:"Filter by status: pending, in_progress, completed, or cancelled"`
+		Project  *string `json:"project,omitempty" jsonschema:"Filter by project name"`
 	}
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "list_tasks",
-		Description: "List all tasks with optional filtering by quadrant and/or status.",
+		Description: "List all tasks with optional filtering by quadrant, status, and/or project.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args listTasksArgs) (*mcp.CallToolResult, any, error) {
 		var quadrant *database.Quadrant
 		if args.Quadrant != nil {
@@ -161,7 +162,7 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 			quadrant = &q
 		}
 
-		tasks, err := h.db.ListTasks(quadrant, args.Status)
+		tasks, err := h.db.ListTasks(quadrant, args.Status, args.Project)
 		if err != nil {
 			return nil, nil, err
 		}

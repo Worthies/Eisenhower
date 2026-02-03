@@ -281,7 +281,7 @@ func (db *DB) GetTask(id int64) (*Task, error) {
 }
 
 // ListTasks retrieves all tasks with optional filtering
-func (db *DB) ListTasks(quadrant *Quadrant, status *string) ([]*Task, error) {
+func (db *DB) ListTasks(quadrant *Quadrant, status *string, project *string) ([]*Task, error) {
 	query := `
 		SELECT id, title, description, quadrant, priority, status, due_date, created_at, updated_at, finished_at, started_at, tags, progress, summary, project
 		FROM tasks
@@ -297,6 +297,11 @@ func (db *DB) ListTasks(quadrant *Quadrant, status *string) ([]*Task, error) {
 	if status != nil {
 		query += " AND status = ?"
 		args = append(args, *status)
+	}
+
+	if project != nil {
+		query += " AND project = ?"
+		args = append(args, *project)
 	}
 
 	query += " ORDER BY priority DESC, created_at DESC"

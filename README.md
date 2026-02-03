@@ -129,6 +129,7 @@ List all tasks with optional filtering.
 
 - `quadrant` (optional): Filter by quadrant
 - `status` (optional): Filter by status
+- `project` (optional): Filter by project name
 
 ### 4. `update_task`
 
