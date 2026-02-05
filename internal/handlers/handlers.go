@@ -153,10 +153,11 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 		Project      *string `json:"project,omitempty" jsonschema:"Filter by project name"`
 		UpdatedSince *string `json:"updated_since,omitempty" jsonschema:"Filter by tasks updated after this time (RFC3339 format, e.g. 2024-12-31T23:59:59Z)"`
 		UpdatedUntil *string `json:"updated_until,omitempty" jsonschema:"Filter by tasks updated before this time (RFC3339 format, e.g. 2024-12-31T23:59:59Z)"`
+		Summary      *string `json:"summary,omitempty" jsonschema:"Filter by summary content (LIKE pattern matching)"`
 	}
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "list_tasks",
-		Description: "List all tasks with optional filtering by quadrant, status, project, and/or update time range.",
+		Description: "List all tasks with optional filtering by quadrant, status, project, update time range, and/or summary.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args listTasksArgs) (*mcp.CallToolResult, any, error) {
 		var quadrant *database.Quadrant
 		if args.Quadrant != nil {
@@ -180,7 +181,7 @@ func (h *TaskHandlers) RegisterTools(s *mcp.Server) {
 			updatedUntil = &t
 		}
 
-		tasks, err := h.db.ListTasks(quadrant, args.Status, args.Project, updatedSince, updatedUntil)
+		tasks, err := h.db.ListTasks(quadrant, args.Status, args.Project, updatedSince, updatedUntil, args.Summary)
 		if err != nil {
 			return nil, nil, err
 		}
