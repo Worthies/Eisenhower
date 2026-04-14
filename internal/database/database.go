@@ -109,9 +109,7 @@ func (db *DB) initSchema() error {
 		due_date DATETIME,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		tags TEXT,
-		progress INTEGER DEFAULT 0 CHECK(progress >= 0 AND progress <= 100),
-		summary TEXT
+		tags TEXT
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_quadrant ON tasks(quadrant);
